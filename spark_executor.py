@@ -15,8 +15,8 @@ class SparkExecutor:
         """Get or create Spark session"""
         if self._spark is None:
             self._spark = SparkSession.builder \
-                .appName(self.config.SPARK_APP_NAME) \
-                .master(self.config.SPARK_MASTER) \
+                .appName(self.config['SPARK_APP_NAME']) \
+                .master(self.config['SPARK_MASTER']) \
                 .config("spark.driver.memory", "2g") \
                 .getOrCreate()
         return self._spark
@@ -42,7 +42,7 @@ class SparkExecutor:
             namespace = {
                 'spark': spark,
                 'sc': spark.sparkContext,
-                'sqlContext': spark._wrapped
+                'sqlContext': spark  # sqlContext is deprecated, use spark instead
             }
             
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
