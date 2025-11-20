@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Open Source Databricks{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h1>Welcome back, {{ current_user.username }}! 👋</h1>
+    
+    <div class="dashboard-grid">
+        <div class="dashboard-card">
+            <h2>📓 Recent Notebooks</h2>
+            <div class="card-content">
+                {% if notebooks %}
+                    <ul class="item-list">
+                        {% for notebook in notebooks[:5] %}
+                        <li>
+                            <a href="{{ url_for('notebook_view', notebook_id=notebook.id) }}">
+                                {{ notebook.name }}
+                            </a>
+                            <span class="item-meta">{{ notebook.updated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-state">No notebooks yet. Create your first notebook!</p>
+                {% endif %}
+                <a href="{{ url_for('notebooks') }}" class="btn btn-secondary">View All Notebooks</a>
+            </div>
+        </div>
+        
+        <div class="dashboard-card">
+            <h2>⚙️ Recent Jobs</h2>
+            <div class="card-content">
+                {% if jobs %}
+                    <ul class="item-list">
+                        {% for job in jobs[:5] %}
+                        <li>
+                            <span class="job-name">{{ job.name }}</span>
+                            <span class="badge badge-{{ job.status }}">{{ job.status }}</span>
+                            <span class="item-meta">{{ job.updated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-state">No jobs scheduled yet.</p>
+                {% endif %}
+                <a href="{{ url_for('jobs') }}" class="btn btn-secondary">View All Jobs</a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="quick-actions">
+        <h2>Quick Actions</h2>
+        <div class="action-buttons">
+            <button onclick="createNotebook()" class="btn btn-primary">📝 New Notebook</button>
+            <button onclick="window.location.href='{{ url_for('jobs') }}'" class="btn btn-primary">⏰ Schedule Job</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function createNotebook() {
+    fetch('/notebooks/create', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({name: 'Untitled Notebook'})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = '/notebooks/' + data.notebook_id;
+        }
+    });
+}
+</script>
+{% endblock %}

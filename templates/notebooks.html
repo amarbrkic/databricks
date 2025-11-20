@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Notebooks - Open Source Databricks{% endblock %}
+
+{% block content %}
+<div class="notebooks-page">
+    <div class="page-header">
+        <h1>📓 My Notebooks</h1>
+        <button onclick="createNotebook()" class="btn btn-primary">+ New Notebook</button>
+    </div>
+    
+    {% if notebooks %}
+    <div class="notebooks-grid">
+        {% for notebook in notebooks %}
+        <div class="notebook-card">
+            <div class="notebook-header">
+                <h3>{{ notebook.name }}</h3>
+                <span class="notebook-language">{{ notebook.language }}</span>
+            </div>
+            <div class="notebook-meta">
+                <span>Updated: {{ notebook.updated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            </div>
+            <div class="notebook-actions">
+                <a href="{{ url_for('notebook_view', notebook_id=notebook.id) }}" class="btn btn-small btn-primary">Open</a>
+                <button onclick="deleteNotebook({{ notebook.id }})" class="btn btn-small btn-danger">Delete</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state-large">
+        <p>🎨 No notebooks yet</p>
+        <p>Create your first notebook to start coding with Apache Spark!</p>
+        <button onclick="createNotebook()" class="btn btn-primary">Create Notebook</button>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function createNotebook() {
+    const name = prompt('Notebook name:', 'Untitled Notebook');
+    if (name) {
+        fetch('/notebooks/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({name: name})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = '/notebooks/' + data.notebook_id;
+            }
+        });
+    }
+}
+
+function deleteNotebook(notebookId) {
+    if (confirm('Are you sure you want to delete this notebook?')) {
+        fetch('/notebooks/' + notebookId + '/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            }
+        });
+    }
+}
+</script>
+{% endblock %}
