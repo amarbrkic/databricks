@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs - Open Source Databricks{% endblock %}
+
+{% block content %}
+<div class="jobs-page">
+    <div class="page-header">
+        <h1>⚙️ Scheduled Jobs</h1>
+        <button onclick="showCreateJobModal()" class="btn btn-primary">+ New Job</button>
+    </div>
+    
+    {% if jobs %}
+    <table class="jobs-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Notebook</th>
+                <th>Schedule</th>
+                <th>Status</th>
+                <th>Last Run</th>
+                <th>Next Run</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td>{{ job.name }}</td>
+                <td>{{ job.notebook.name if job.notebook else 'N/A' }}</td>
+                <td><code>{{ job.schedule or 'N/A' }}</code></td>
+                <td><span class="badge badge-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ job.last_run.strftime('%Y-%m-%d %H:%M') if job.last_run else 'Never' }}</td>
+                <td>{{ job.next_run.strftime('%Y-%m-%d %H:%M') if job.next_run else 'N/A' }}</td>
+                <td>
+                    {% if job.status == 'active' %}
+                    <button onclick="deactivateJob({{ job.id }})" class="btn btn-small btn-warning">Pause</button>
+                    {% else %}
+                    <button onclick="activateJob({{ job.id }})" class="btn btn-small btn-success">Start</button>
+                    {% endif %}
+                    <button onclick="viewExecutions({{ job.id }})" class="btn btn-small btn-secondary">History</button>
+                    <button onclick="deleteJob({{ job.id }})" class="btn btn-small btn-danger">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state-large">
+        <p>⏰ No scheduled jobs yet</p>
+        <p>Create a job to automate notebook execution!</p>
+        <button onclick="showCreateJobModal()" class="btn btn-primary">Create Job</button>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Create Job Modal -->
+<div id="createJobModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h2>Create New Job</h2>
+        <form id="createJobForm">
+            <div class="form-group">
+                <label for="jobName">Job Name</label>
+                <input type="text" id="jobName" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="jobNotebook">Notebook</label>
+                <select id="jobNotebook" required>
+                    <option value="">Select a notebook...</option>
+                    {% for notebook in notebooks %}
+                    <option value="{{ notebook.id }}">{{ notebook.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="jobSchedule">Schedule (Cron Expression)</label>
+                <input type="text" id="jobSchedule" placeholder="0 0 * * *" required>
+                <small>Example: "0 0 * * *" = daily at midnight, "0 * * * *" = every hour</small>
+            </div>
+            
+            <div class="modal-actions">
+                <button type="submit" class="btn btn-primary">Create Job</button>
+                <button type="button" onclick="hideCreateJobModal()" class="btn btn-secondary">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Executions Modal -->
+<div id="executionsModal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+        <h2>Job Execution History</h2>
+        <div id="executionsContent">Loading...</div>
+        <div class="modal-actions">
+            <button type="button" onclick="hideExecutionsModal()" class="btn btn-secondary">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function showCreateJobModal() {
+    document.getElementById('createJobModal').style.display = 'flex';
+}
+
+function hideCreateJobModal() {
+    document.getElementById('createJobModal').style.display = 'none';
+}
+
+function hideExecutionsModal() {
+    document.getElementById('executionsModal').style.display = 'none';
+}
+
+document.getElementById('createJobForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const data = {
+        name: document.getElementById('jobName').value,
+        notebook_id: document.getElementById('jobNotebook').value,
+        schedule: document.getElementById('jobSchedule').value
+    };
+    
+    fetch('/jobs/create', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        }
+    });
+});
+
+function activateJob(jobId) {
+    fetch(`/jobs/${jobId}/activate`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        }
+    });
+}
+
+function deactivateJob(jobId) {
+    fetch(`/jobs/${jobId}/deactivate`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        }
+    });
+}
+
+function deleteJob(jobId) {
+    if (confirm('Are you sure you want to delete this job?')) {
+        fetch(`/jobs/${jobId}/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            }
+        });
+    }
+}
+
+function viewExecutions(jobId) {
+    document.getElementById('executionsModal').style.display = 'flex';
+    
+    fetch(`/jobs/${jobId}/executions`)
+        .then(response => response.json())
+        .then(executions => {
+            const content = document.getElementById('executionsContent');
+            
+            if (executions.length === 0) {
+                content.innerHTML = '<p>No executions yet.</p>';
+                return;
+            }
+            
+            let html = '<table class="executions-table"><thead><tr><th>Status</th><th>Started</th><th>Completed</th><th>Output</th></tr></thead><tbody>';
+            
+            executions.forEach(exec => {
+                html += `<tr>
+                    <td><span class="badge badge-${exec.status}">${exec.status}</span></td>
+                    <td>${exec.started_at || 'N/A'}</td>
+                    <td>${exec.completed_at || 'N/A'}</td>
+                    <td><pre>${exec.output || exec.error || 'No output'}</pre></td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table>';
+            content.innerHTML = html;
+        });
+}
+</script>
+{% endblock %}

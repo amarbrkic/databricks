@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}{{ notebook.name }} - Open Source Databricks{% endblock %}
+
+{% block extra_css %}
+<style>
+.notebook-editor {
+    height: calc(100vh - 150px);
+    display: flex;
+    flex-direction: column;
+}
+
+.notebook-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    background: #2c3e50;
+    color: white;
+    border-radius: 8px 8px 0 0;
+}
+
+.notebook-name {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.notebook-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.code-editor {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+#codeContent {
+    flex: 1;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    padding: 15px;
+    border: 1px solid #ddd;
+    resize: none;
+    background: #1e1e1e;
+    color: #d4d4d4;
+}
+
+.output-panel {
+    width: 40%;
+    border-left: 2px solid #ddd;
+    background: #f8f9fa;
+    overflow-y: auto;
+    padding: 15px;
+}
+
+.output-header {
+    font-weight: bold;
+    margin-bottom: 10px;
+    color: #2c3e50;
+}
+
+.output-content {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    background: white;
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+}
+
+.output-error {
+    color: #e74c3c;
+}
+
+.output-success {
+    color: #27ae60;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="notebook-editor">
+    <div class="notebook-toolbar">
+        <div class="notebook-name">
+            <input type="text" id="notebookName" value="{{ notebook.name }}" 
+                   style="background: transparent; border: none; color: white; font-size: 18px; font-weight: bold;">
+        </div>
+        <div class="toolbar-actions">
+            <button onclick="saveNotebook()" class="btn btn-secondary">💾 Save</button>
+            <button onclick="executeCode()" class="btn btn-success">▶️ Run</button>
+            <a href="{{ url_for('notebooks') }}" class="btn btn-secondary">← Back</a>
+        </div>
+    </div>
+    
+    <div class="notebook-body">
+        <div class="code-editor">
+            <textarea id="codeContent" placeholder="# Write your Python/Spark code here...">{{ notebook.content }}</textarea>
+        </div>
+        
+        <div class="output-panel">
+            <div class="output-header">Output</div>
+            <div id="outputContent" class="output-content">
+                Click "Run" to execute your code...
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const notebookId = {{ notebook.id }};
+
+function saveNotebook() {
+    const name = document.getElementById('notebookName').value;
+    const content = document.getElementById('codeContent').value;
+    
+    fetch(`/notebooks/${notebookId}/save`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({name: name, content: content})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showOutput('✓ Notebook saved successfully', false);
+        }
+    })
+    .catch(error => {
+        showOutput('✗ Error saving notebook: ' + error, true);
+    });
+}
+
+function executeCode() {
+    const code = document.getElementById('codeContent').value;
+    const outputEl = document.getElementById('outputContent');
+    
+    outputEl.textContent = 'Executing...';
+    outputEl.className = 'output-content';
+    
+    fetch(`/notebooks/${notebookId}/execute`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({code: code})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            let output = data.output || '(No output)';
+            if (data.error) {
+                output += '\n\nWarnings/Errors:\n' + data.error;
+            }
+            showOutput(output, false);
+        } else {
+            showOutput('Error:\n' + (data.error || 'Unknown error'), true);
+        }
+    })
+    .catch(error => {
+        showOutput('Error executing code:\n' + error, true);
+    });
+}
+
+function showOutput(text, isError) {
+    const outputEl = document.getElementById('outputContent');
+    outputEl.textContent = text;
+    outputEl.className = 'output-content ' + (isError ? 'output-error' : 'output-success');
+}
+
+// Auto-save on Ctrl+S
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        saveNotebook();
+    }
+});
+</script>
+{% endblock %}
