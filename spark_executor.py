@@ -14,6 +14,10 @@ class SparkExecutor:
     def get_spark_session(self):
         """Get or create Spark session"""
         if self._spark is None:
+            # Handle both Config object and Flask config dict
+            app_name = getattr(self.config, 'SPARK_APP_NAME', None) or self.config.get('SPARK_APP_NAME', 'OpenSourceDatabricks')
+            master = getattr(self.config, 'SPARK_MASTER', None) or self.config.get('SPARK_MASTER', 'local[*]')
+            
             self._spark = SparkSession.builder \
                 .appName(self.config['SPARK_APP_NAME']) \
                 .master(self.config['SPARK_MASTER']) \

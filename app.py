@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from config import Config
-from models import db, User, Notebook, Job, JobExecution
+from models import db, User, Notebook, Cell, Job, JobExecution
 from spark_executor import SparkExecutor
 from scheduler import JobScheduler
 from datetime import datetime
@@ -124,6 +124,16 @@ def create_notebook():
         content='# Welcome to your notebook\n\n# You can use Spark here\nprint("Hello, World!")\n'
     )
     db.session.add(notebook)
+    db.session.flush()  # Get notebook ID
+    
+    # Create a default cell
+    default_cell = Cell(
+        notebook_id=notebook.id,
+        cell_type='code',
+        content='# Welcome to your notebook\n\n# You can use Spark here\nprint("Hello, World!")',
+        position=0
+    )
+    db.session.add(default_cell)
     db.session.commit()
     
     return jsonify({'success': True, 'notebook_id': notebook.id})
@@ -135,7 +145,7 @@ def notebook_view(notebook_id):
     notebook = Notebook.query.get_or_404(notebook_id)
     if notebook.user_id != current_user.id:
         return "Unauthorized", 403
-    return render_template('notebook.html', notebook=notebook)
+    return render_template('notebook_jupyter.html', notebook=notebook)
 
 
 @app.route('/notebooks/<int:notebook_id>/get')
@@ -145,11 +155,34 @@ def get_notebook(notebook_id):
     if notebook.user_id != current_user.id:
         return jsonify({'error': 'Unauthorized'}), 403
     
+    # Get all cells ordered by position
+    cells = Cell.query.filter_by(notebook_id=notebook_id).order_by(Cell.position).all()
+    
+    # If no cells exist (legacy notebook), create one from content
+    if not cells and notebook.content:
+        cell = Cell(
+            notebook_id=notebook.id,
+            cell_type='code',
+            content=notebook.content,
+            position=0
+        )
+        db.session.add(cell)
+        db.session.commit()
+        cells = [cell]
+    
     return jsonify({
         'id': notebook.id,
         'name': notebook.name,
-        'content': notebook.content,
-        'language': notebook.language
+        'language': notebook.language,
+        'cells': [{
+            'id': cell.id,
+            'cell_type': cell.cell_type,
+            'content': cell.content,
+            'position': cell.position,
+            'output': cell.output,
+            'error': cell.error,
+            'execution_count': cell.execution_count
+        } for cell in cells]
     })
 
 
@@ -194,6 +227,162 @@ def delete_notebook(notebook_id):
     db.session.commit()
     
     return jsonify({'success': True})
+
+
+# Cell routes
+@app.route('/notebooks/<int:notebook_id>/cells/create', methods=['POST'])
+@login_required
+def create_cell(notebook_id):
+    notebook = Notebook.query.get_or_404(notebook_id)
+    if notebook.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    data = request.get_json()
+    cell_type = data.get('cell_type', 'code')
+    position = data.get('position')
+    
+    # If position not specified, add at end
+    if position is None:
+        max_position = db.session.query(db.func.max(Cell.position)).filter_by(notebook_id=notebook_id).scalar()
+        position = (max_position or -1) + 1
+    else:
+        # Shift cells down to make room
+        cells_to_shift = Cell.query.filter(
+            Cell.notebook_id == notebook_id,
+            Cell.position >= position
+        ).all()
+        for cell in cells_to_shift:
+            cell.position += 1
+    
+    cell = Cell(
+        notebook_id=notebook_id,
+        cell_type=cell_type,
+        content=data.get('content', ''),
+        position=position
+    )
+    db.session.add(cell)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'cell': {
+            'id': cell.id,
+            'cell_type': cell.cell_type,
+            'content': cell.content,
+            'position': cell.position,
+            'output': cell.output,
+            'error': cell.error,
+            'execution_count': cell.execution_count
+        }
+    })
+
+
+@app.route('/cells/<int:cell_id>/update', methods=['POST'])
+@login_required
+def update_cell(cell_id):
+    cell = Cell.query.get_or_404(cell_id)
+    notebook = Notebook.query.get_or_404(cell.notebook_id)
+    if notebook.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    data = request.get_json()
+    if 'content' in data:
+        cell.content = data['content']
+    if 'cell_type' in data:
+        cell.cell_type = data['cell_type']
+    
+    cell.updated_at = datetime.utcnow()
+    notebook.updated_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+
+@app.route('/cells/<int:cell_id>/execute', methods=['POST'])
+@login_required
+def execute_cell(cell_id):
+    cell = Cell.query.get_or_404(cell_id)
+    notebook = Notebook.query.get_or_404(cell.notebook_id)
+    if notebook.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    if cell.cell_type != 'code':
+        return jsonify({'success': True, 'output': '', 'error': ''})
+    
+    result = spark_executor.execute_code(cell.content, notebook.language)
+    
+    # Update cell with execution results
+    cell.output = result.get('output', '')
+    cell.error = result.get('error', '')
+    if result.get('success'):
+        cell.execution_count = (cell.execution_count or 0) + 1
+    cell.updated_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({
+        'success': result.get('success', False),
+        'output': cell.output,
+        'error': cell.error,
+        'execution_count': cell.execution_count
+    })
+
+
+@app.route('/cells/<int:cell_id>/delete', methods=['POST'])
+@login_required
+def delete_cell(cell_id):
+    cell = Cell.query.get_or_404(cell_id)
+    notebook = Notebook.query.get_or_404(cell.notebook_id)
+    if notebook.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    position = cell.position
+    db.session.delete(cell)
+    
+    # Shift remaining cells up
+    cells_to_shift = Cell.query.filter(
+        Cell.notebook_id == cell.notebook_id,
+        Cell.position > position
+    ).all()
+    for c in cells_to_shift:
+        c.position -= 1
+    
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/cells/<int:cell_id>/move', methods=['POST'])
+@login_required
+def move_cell(cell_id):
+    cell = Cell.query.get_or_404(cell_id)
+    notebook = Notebook.query.get_or_404(cell.notebook_id)
+    if notebook.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    data = request.get_json()
+    direction = data.get('direction')  # 'up' or 'down'
+    
+    if direction == 'up' and cell.position > 0:
+        # Swap with cell above
+        cell_above = Cell.query.filter_by(
+            notebook_id=cell.notebook_id,
+            position=cell.position - 1
+        ).first()
+        if cell_above:
+            cell.position, cell_above.position = cell_above.position, cell.position
+            db.session.commit()
+            return jsonify({'success': True})
+    elif direction == 'down':
+        # Swap with cell below
+        cell_below = Cell.query.filter_by(
+            notebook_id=cell.notebook_id,
+            position=cell.position + 1
+        ).first()
+        if cell_below:
+            cell.position, cell_below.position = cell_below.position, cell.position
+            db.session.commit()
+            return jsonify({'success': True})
+    
+    return jsonify({'success': False, 'error': 'Cannot move cell in that direction'})
 
 
 # Job routes
