@@ -505,9 +505,13 @@ function renderMarkdown(text) {
 }
 
 function editMarkdownCell(cellId) {
-    const cellElement = document.querySelector(`[data-cell-id="${cellId}"]`);
-    const textarea = cellElement.parentElement.querySelector('.cell-input');
-    const preview = cellElement.parentElement.querySelector('.markdown-preview');
+    const textarea = document.querySelector(`textarea[data-cell-id="${cellId}"]`);
+    if (!textarea) return;
+    
+    const cellInputArea = textarea.parentElement;
+    if (!cellInputArea) return;
+    
+    const preview = cellInputArea.querySelector('.markdown-preview');
     
     if (textarea && preview) {
         textarea.style.display = 'block';
@@ -587,17 +591,20 @@ async function runCell(cellId) {
     const cell = cells.find(c => c.id === cellId);
     
     if (!cell || cell.cell_type !== 'code') return;
+    if (!cellElement) return;
     
     // Save content first
     await saveCellContent(cellId);
     
     // Show running status
-    const toolbar = cellElement.querySelector('.cell-toolbar');
     let statusDiv = cellElement.querySelector('.cell-status');
     if (!statusDiv) {
         statusDiv = document.createElement('div');
         statusDiv.className = 'cell-status running';
-        cellElement.insertBefore(statusDiv, cellElement.querySelector('.cell-content'));
+        const cellContent = cellElement.querySelector('.cell-content');
+        if (cellContent) {
+            cellElement.insertBefore(statusDiv, cellContent);
+        }
     } else {
         statusDiv.className = 'cell-status running';
     }
@@ -624,14 +631,19 @@ async function runCell(cellId) {
             statusDiv.innerHTML = '✗ Error';
         }
         
-        setTimeout(() => {
-            statusDiv.remove();
-            renderCells();
+        setTimeout(async () => {
+            if (statusDiv && statusDiv.parentElement) {
+                statusDiv.remove();
+            }
+            // Reload notebook to show updated output
+            await loadNotebook();
         }, 2000);
         
     } catch (error) {
-        statusDiv.className = 'cell-status error';
-        statusDiv.innerHTML = '✗ Error: ' + error.message;
+        if (statusDiv) {
+            statusDiv.className = 'cell-status error';
+            statusDiv.innerHTML = '✗ Error: ' + error.message;
+        }
         console.error('Error executing cell:', error);
     }
 }

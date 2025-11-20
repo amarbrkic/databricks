@@ -14,9 +14,13 @@ class SparkExecutor:
     def get_spark_session(self):
         """Get or create Spark session"""
         if self._spark is None:
+            # Handle both Config object and Flask config dict
+            app_name = getattr(self.config, 'SPARK_APP_NAME', None) or self.config.get('SPARK_APP_NAME', 'OpenSourceDatabricks')
+            master = getattr(self.config, 'SPARK_MASTER', None) or self.config.get('SPARK_MASTER', 'local[*]')
+            
             self._spark = SparkSession.builder \
-                .appName(self.config.SPARK_APP_NAME) \
-                .master(self.config.SPARK_MASTER) \
+                .appName(app_name) \
+                .master(master) \
                 .config("spark.driver.memory", "2g") \
                 .getOrCreate()
         return self._spark
@@ -41,8 +45,7 @@ class SparkExecutor:
             # Create execution namespace with spark context
             namespace = {
                 'spark': spark,
-                'sc': spark.sparkContext,
-                'sqlContext': spark._wrapped
+                'sc': spark.sparkContext
             }
             
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
