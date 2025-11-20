@@ -50,9 +50,13 @@ class SparkExecutor:
                     
                     # Convert result to string representation
                     if result_df is not None:
-                        # Get the data as pandas for better display
-                        pandas_df = result_df.toPandas()
-                        print(pandas_df.to_string(index=False))
+                        try:
+                            # Try to get the data as pandas for better display
+                            pandas_df = result_df.toPandas()
+                            print(pandas_df.to_string(index=False))
+                        except:
+                            # Fall back to Spark's show method
+                            result_df.show()
                 
                 output = stdout_capture.getvalue()
                 error = stderr_capture.getvalue()
