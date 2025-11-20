@@ -19,8 +19,8 @@ class SparkExecutor:
             master = getattr(self.config, 'SPARK_MASTER', None) or self.config.get('SPARK_MASTER', 'local[*]')
             
             self._spark = SparkSession.builder \
-                .appName(app_name) \
-                .master(master) \
+                .appName(self.config['SPARK_APP_NAME']) \
+                .master(self.config['SPARK_MASTER']) \
                 .config("spark.driver.memory", "2g") \
                 .getOrCreate()
         return self._spark
@@ -45,7 +45,8 @@ class SparkExecutor:
             # Create execution namespace with spark context
             namespace = {
                 'spark': spark,
-                'sc': spark.sparkContext
+                'sc': spark.sparkContext,
+                'sqlContext': spark  # sqlContext is deprecated, use spark instead
             }
             
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
