@@ -30,14 +30,33 @@ class Notebook(db.Model):
     """Notebook model for storing notebook data"""
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
-    content = db.Column(db.Text, default='')
+    content = db.Column(db.Text, default='')  # Legacy field for backward compatibility
     language = db.Column(db.String(50), default='python')
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    cells = db.relationship('Cell', backref='notebook', lazy=True, cascade='all, delete-orphan', order_by='Cell.position')
+    
     def __repr__(self):
         return f'<Notebook {self.name}>'
+
+
+class Cell(db.Model):
+    """Cell model for notebook cells"""
+    id = db.Column(db.Integer, primary_key=True)
+    notebook_id = db.Column(db.Integer, db.ForeignKey('notebook.id'), nullable=False)
+    cell_type = db.Column(db.String(20), default='code')  # 'code' or 'markdown'
+    content = db.Column(db.Text, default='')
+    position = db.Column(db.Integer, nullable=False)  # Order of cells in notebook
+    output = db.Column(db.Text)  # Cached output from last execution
+    error = db.Column(db.Text)  # Cached error from last execution
+    execution_count = db.Column(db.Integer)  # Execution counter
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<Cell {self.id} in Notebook {self.notebook_id}>'
 
 
 class Job(db.Model):
