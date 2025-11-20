@@ -145,6 +145,11 @@
     color: #0969da;
 }
 
+.cell-type-badge.sql {
+    background: #fff5b1;
+    color: #bf8700;
+}
+
 .cell-type-badge.markdown {
     background: #dafbe1;
     color: #1a7f37;
@@ -206,10 +211,11 @@
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
     font-size: 13px;
     line-height: 1.5;
-    resize: vertical;
+    resize: none;
     min-height: 60px;
     background: white;
     color: #24292f;
+    overflow: hidden;
 }
 
 .cell-input:focus {
@@ -400,11 +406,17 @@ async function loadNotebook() {
 function renderCells() {
     const container = document.getElementById('cellsContainer');
     const emptyNotebook = document.getElementById('emptyNotebook');
-    container.innerHTML = '';
+    
+    // Clear only the cells, preserve the emptyNotebook element
+    const children = Array.from(container.children);
+    children.forEach(child => {
+        if (child.id !== 'emptyNotebook') {
+            child.remove();
+        }
+    });
     
     if (cells.length === 0) {
         emptyNotebook.style.display = 'block';
-        container.appendChild(emptyNotebook);
         addAddCellButton(container, 0);
         return;
     }
@@ -428,8 +440,8 @@ function createCellElement(cell, index) {
         }
     };
     
-    const cellTypeLabel = cell.cell_type === 'code' ? 'Code' : 'Markdown';
-    const executionLabel = cell.cell_type === 'code' ? `[${cell.execution_count || ' '}]` : '';
+    const cellTypeLabel = cell.cell_type === 'code' ? 'Code' : cell.cell_type === 'sql' ? 'SQL' : 'Markdown';
+    const executionLabel = (cell.cell_type === 'code' || cell.cell_type === 'sql') ? `[${cell.execution_count || ' '}]` : '';
     
     cellDiv.innerHTML = `
         <div class="cell-toolbar">
@@ -438,32 +450,30 @@ function createCellElement(cell, index) {
                 <span class="cell-execution-count">${executionLabel}</span>
             </div>
             <div class="cell-actions">
-                ${cell.cell_type === 'code' ? 
-                    '<button class="cell-btn" onclick="runCell(' + cell.id + ')" title="Run cell">▶️</button>' : 
-                    '<button class="cell-btn" onclick="toggleCellType(' + cell.id + ')" title="Convert to code">💻</button>'}
-                ${cell.cell_type === 'markdown' ? 
-                    '<button class="cell-btn" onclick="toggleCellType(' + cell.id + ')" title="Convert to markdown">📝</button>' : ''}
+                ${(cell.cell_type === 'code' || cell.cell_type === 'sql') ? 
+                    '<button class="cell-btn" onclick="runCell(' + cell.id + ')" title="Run cell">▶️</button>' : ''}
+                <button class="cell-btn" onclick="cycleCellType(' + cell.id + ')" title="Change cell type">🔄</button>
                 ${index > 0 ? '<button class="cell-btn" onclick="moveCellUp(' + cell.id + ')" title="Move up">⬆️</button>' : ''}
                 ${index < cells.length - 1 ? '<button class="cell-btn" onclick="moveCellDown(' + cell.id + ')" title="Move down">⬇️</button>' : ''}
                 <button class="cell-btn" onclick="deleteCell(' + cell.id + ')" title="Delete cell">🗑️</button>
             </div>
         </div>
         <div class="cell-content">
-            <div class="cell-prompt">${cell.cell_type === 'code' ? 'In ' + executionLabel : ''}</div>
+            <div class="cell-prompt">${(cell.cell_type === 'code' || cell.cell_type === 'sql') ? 'In ' + executionLabel : ''}</div>
             <div class="cell-input-area">
-                ${cell.cell_type === 'code' ? 
+                ${cell.cell_type === 'markdown' ? 
                     `<textarea class="cell-input" data-cell-id="${cell.id}" 
                         onkeydown="handleCellKeydown(event, ${cell.id})"
-                        oninput="updateCellContent(${cell.id}, this.value)">${cell.content || ''}</textarea>` :
-                    `<textarea class="cell-input" data-cell-id="${cell.id}" 
-                        onkeydown="handleCellKeydown(event, ${cell.id})"
-                        oninput="updateCellContent(${cell.id}, this.value)"
+                        oninput="updateCellContent(${cell.id}, this.value); autoResizeTextarea(this)"
                         style="display: none;">${cell.content || ''}</textarea>
-                    <div class="markdown-preview" ondblclick="editMarkdownCell(${cell.id})">${renderMarkdown(cell.content || '')}</div>`
+                    <div class="markdown-preview" ondblclick="editMarkdownCell(${cell.id})">${renderMarkdown(cell.content || '')}</div>` :
+                    `<textarea class="cell-input" data-cell-id="${cell.id}" 
+                        onkeydown="handleCellKeydown(event, ${cell.id})"
+                        oninput="updateCellContent(${cell.id}, this.value); autoResizeTextarea(this)">${cell.content || ''}</textarea>`
                 }
             </div>
         </div>
-        ${cell.cell_type === 'code' && (cell.output || cell.error) ? `
+        ${(cell.cell_type === 'code' || cell.cell_type === 'sql') && (cell.output || cell.error) ? `
             <div class="cell-output">
                 <div class="cell-output-content ${cell.error ? 'cell-output-error' : ''}">
                     ${cell.output || ''}${cell.error ? '\n\nError:\n' + cell.error : ''}
@@ -471,6 +481,14 @@ function createCellElement(cell, index) {
             </div>
         ` : ''}
     `;
+    
+    // Auto-resize textarea after it's added to DOM
+    setTimeout(() => {
+        const textarea = cellDiv.querySelector('.cell-input');
+        if (textarea) {
+            autoResizeTextarea(textarea);
+        }
+    }, 0);
     
     return cellDiv;
 }
@@ -504,6 +522,17 @@ function renderMarkdown(text) {
     return html || '<p style="color: #999;">Double-click to edit</p>';
 }
 
+function autoResizeTextarea(textarea) {
+    if (!textarea) return;
+    
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = 'auto';
+    
+    // Set height to scrollHeight to fit content
+    const newHeight = Math.max(60, textarea.scrollHeight);
+    textarea.style.height = newHeight + 'px';
+}
+
 function editMarkdownCell(cellId) {
     const textarea = document.querySelector(`textarea[data-cell-id="${cellId}"]`);
     if (!textarea) return;
@@ -517,6 +546,7 @@ function editMarkdownCell(cellId) {
         textarea.style.display = 'block';
         preview.style.display = 'none';
         textarea.focus();
+        autoResizeTextarea(textarea);
     }
 }
 
@@ -590,7 +620,7 @@ async function runCell(cellId) {
     const cellElement = document.querySelector(`.cell[data-cell-id="${cellId}"]`);
     const cell = cells.find(c => c.id === cellId);
     
-    if (!cell || cell.cell_type !== 'code') return;
+    if (!cell || (cell.cell_type !== 'code' && cell.cell_type !== 'sql')) return;
     if (!cellElement) return;
     
     // Save content first
@@ -691,11 +721,19 @@ async function moveCellDown(cellId) {
     }
 }
 
-async function toggleCellType(cellId) {
+async function cycleCellType(cellId) {
     const cell = cells.find(c => c.id === cellId);
     if (!cell) return;
     
-    const newType = cell.cell_type === 'code' ? 'markdown' : 'code';
+    // Cycle through: code -> sql -> markdown -> code
+    let newType;
+    if (cell.cell_type === 'code') {
+        newType = 'sql';
+    } else if (cell.cell_type === 'sql') {
+        newType = 'markdown';
+    } else {
+        newType = 'code';
+    }
     
     try {
         const response = await fetch(`/cells/${cellId}/update`, {
@@ -711,6 +749,11 @@ async function toggleCellType(cellId) {
     } catch (error) {
         console.error('Error changing cell type:', error);
     }
+}
+
+// Keep the old function for backward compatibility
+async function toggleCellType(cellId) {
+    await cycleCellType(cellId);
 }
 
 async function saveNotebook() {
@@ -748,7 +791,7 @@ function handleCellKeydown(event, cellId) {
     if (event.shiftKey && event.key === 'Enter') {
         event.preventDefault();
         const cell = cells.find(c => c.id === cellId);
-        if (cell && cell.cell_type === 'code') {
+        if (cell && (cell.cell_type === 'code' || cell.cell_type === 'sql')) {
             runCell(cellId);
         } else {
             // For markdown cells, hide editor and show preview
@@ -795,7 +838,17 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
+// Initialize all textareas with auto-resize
+function initializeAutoResize() {
+    document.querySelectorAll('.cell-input').forEach(textarea => {
+        autoResizeTextarea(textarea);
+    });
+}
+
 // Initialize
-loadNotebook();
+loadNotebook().then(() => {
+    // Auto-resize all textareas after loading
+    setTimeout(initializeAutoResize, 100);
+});
 </script>
 {% endblock %}

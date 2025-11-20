@@ -32,6 +32,7 @@ class Notebook(db.Model):
     name = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, default='')  # Legacy field for backward compatibility
     language = db.Column(db.String(50), default='python')
+    folder = db.Column(db.String(500), default='/')  # Folder path for organization
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -46,7 +47,7 @@ class Cell(db.Model):
     """Cell model for notebook cells"""
     id = db.Column(db.Integer, primary_key=True)
     notebook_id = db.Column(db.Integer, db.ForeignKey('notebook.id'), nullable=False)
-    cell_type = db.Column(db.String(20), default='code')  # 'code' or 'markdown'
+    cell_type = db.Column(db.String(20), default='code')  # 'code', 'sql', or 'markdown'
     content = db.Column(db.Text, default='')
     position = db.Column(db.Integer, nullable=False)  # Order of cells in notebook
     output = db.Column(db.Text)  # Cached output from last execution
@@ -91,3 +92,49 @@ class JobExecution(db.Model):
     
     def __repr__(self):
         return f'<JobExecution {self.id} for Job {self.job_id}>'
+
+
+class Catalog(db.Model):
+    """Catalog for SQL data organization"""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    description = db.Column(db.Text)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    schemas = db.relationship('Schema', backref='catalog', lazy=True, cascade='all, delete-orphan')
+    
+    def __repr__(self):
+        return f'<Catalog {self.name}>'
+
+
+class Schema(db.Model):
+    """Schema (layer) within a catalog - e.g., bronze, silver, gold"""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    catalog_id = db.Column(db.Integer, db.ForeignKey('catalog.id'), nullable=False)
+    description = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    tables = db.relationship('Table', backref='schema', lazy=True, cascade='all, delete-orphan')
+    
+    __table_args__ = (db.UniqueConstraint('catalog_id', 'name', name='_catalog_schema_uc'),)
+    
+    def __repr__(self):
+        return f'<Schema {self.name} in Catalog {self.catalog_id}>'
+
+
+class Table(db.Model):
+    """Table within a schema"""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    schema_id = db.Column(db.Integer, db.ForeignKey('schema.id'), nullable=False)
+    data = db.Column(db.Text)  # JSON serialized data
+    description = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (db.UniqueConstraint('schema_id', 'name', name='_schema_table_uc'),)
+    
+    def __repr__(self):
+        return f'<Table {self.name} in Schema {self.schema_id}>'

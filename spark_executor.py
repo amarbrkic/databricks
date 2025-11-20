@@ -25,9 +25,9 @@ class SparkExecutor:
                 .getOrCreate()
         return self._spark
     
-    def execute_code(self, code, language='python'):
+    def execute_code(self, code, language='python', cell_type='code'):
         """Execute code and return output"""
-        if language != 'python':
+        if language not in ['python', 'sql'] and cell_type != 'sql':
             return {
                 'success': False,
                 'output': '',
@@ -42,6 +42,32 @@ class SparkExecutor:
             stdout_capture = StringIO()
             stderr_capture = StringIO()
             
+            # Handle SQL execution
+            if cell_type == 'sql' or language == 'sql':
+                with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                    # Execute SQL query
+                    result_df = spark.sql(code)
+                    
+                    # Convert result to string representation
+                    if result_df is not None:
+                        try:
+                            # Try to get the data as pandas for better display
+                            pandas_df = result_df.toPandas()
+                            print(pandas_df.to_string(index=False))
+                        except:
+                            # Fall back to Spark's show method
+                            result_df.show()
+                
+                output = stdout_capture.getvalue()
+                error = stderr_capture.getvalue()
+                
+                return {
+                    'success': True,
+                    'output': output,
+                    'error': error if error else None
+                }
+            
+            # Handle Python execution
             # Create execution namespace with spark context
             namespace = {
                 'spark': spark,

@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from config import Config
-from models import db, User, Notebook, Cell, Job, JobExecution
+from models import db, User, Notebook, Cell, Job, JobExecution, Catalog, Schema, Table
 from spark_executor import SparkExecutor
 from scheduler import JobScheduler
 from datetime import datetime
@@ -306,10 +306,10 @@ def execute_cell(cell_id):
     if notebook.user_id != current_user.id:
         return jsonify({'error': 'Unauthorized'}), 403
     
-    if cell.cell_type != 'code':
+    if cell.cell_type not in ['code', 'sql']:
         return jsonify({'success': True, 'output': '', 'error': ''})
     
-    result = spark_executor.execute_code(cell.content, notebook.language)
+    result = spark_executor.execute_code(cell.content, notebook.language, cell.cell_type)
     
     # Update cell with execution results
     cell.output = result.get('output', '')
@@ -482,6 +482,74 @@ def job_executions(job_id):
     } for e in executions])
 
 
+# Catalog management routes
+@app.route('/catalogs', methods=['GET'])
+@login_required
+def list_catalogs():
+    catalogs = Catalog.query.filter_by(user_id=current_user.id).all()
+    return jsonify([{
+        'id': c.id,
+        'name': c.name,
+        'description': c.description,
+        'created_at': c.created_at.isoformat() if c.created_at else None
+    } for c in catalogs])
+
+
+@app.route('/catalogs/create', methods=['POST'])
+@login_required
+def create_catalog():
+    data = request.get_json()
+    name = data.get('name')
+    description = data.get('description', '')
+    
+    if Catalog.query.filter_by(name=name).first():
+        return jsonify({'success': False, 'error': 'Catalog already exists'}), 400
+    
+    catalog = Catalog(name=name, description=description, user_id=current_user.id)
+    db.session.add(catalog)
+    
+    # Create default schemas (bronze, silver, gold)
+    for schema_name in ['bronze', 'silver', 'gold']:
+        schema = Schema(name=schema_name, catalog_id=catalog.id)
+        db.session.add(schema)
+    
+    db.session.commit()
+    return jsonify({'success': True, 'catalog_id': catalog.id})
+
+
+@app.route('/catalogs/<int:catalog_id>/schemas', methods=['GET'])
+@login_required
+def list_schemas(catalog_id):
+    catalog = Catalog.query.get_or_404(catalog_id)
+    if catalog.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    schemas = Schema.query.filter_by(catalog_id=catalog_id).all()
+    return jsonify([{
+        'id': s.id,
+        'name': s.name,
+        'description': s.description,
+        'created_at': s.created_at.isoformat() if s.created_at else None
+    } for s in schemas])
+
+
+@app.route('/schemas/<int:schema_id>/tables', methods=['GET'])
+@login_required
+def list_tables(schema_id):
+    schema = Schema.query.get_or_404(schema_id)
+    catalog = Catalog.query.get_or_404(schema.catalog_id)
+    if catalog.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    tables = Table.query.filter_by(schema_id=schema_id).all()
+    return jsonify([{
+        'id': t.id,
+        'name': t.name,
+        'description': t.description,
+        'created_at': t.created_at.isoformat() if t.created_at else None
+    } for t in tables])
+
+
 def init_db():
     """Initialize database"""
     with app.app_context():
@@ -493,7 +561,24 @@ def init_db():
             demo_user.set_password('demo')
             db.session.add(demo_user)
             db.session.commit()
+            
+            # Create default catalog for demo user
+            catalog = Catalog(name='main', description='Main catalog', user_id=demo_user.id)
+            db.session.add(catalog)
+            db.session.flush()
+            
+            # Create default schemas (bronze, silver, gold)
+            for schema_name in ['bronze', 'silver', 'gold']:
+                schema = Schema(
+                    name=schema_name, 
+                    catalog_id=catalog.id,
+                    description=f'{schema_name.capitalize()} layer for data processing'
+                )
+                db.session.add(schema)
+            
+            db.session.commit()
             print("Created demo user (username: demo, password: demo)")
+            print("Created default catalog 'main' with bronze, silver, gold schemas")
 
 
 if __name__ == '__main__':
